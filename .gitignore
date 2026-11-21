@@ -1,0 +1,10 @@
+/build*/
+/dist*/
+/tests/output/
+/tests/
+/build-release.cmd
+/build-log.txt
+/dist-manifest-log.json
+/crowdbase-error.txt
+*.user
+__pycache__/

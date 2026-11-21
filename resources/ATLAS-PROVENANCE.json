@@ -1,0 +1,12 @@
+{
+  "method": "granular resynthesis of original synthesized ensemble renders",
+  "real_crowd_or_film_samples": false,
+  "sources": [
+    "reference-ensemble-64s.wav",
+    "huge-play-ensemble-64s.wav"
+  ],
+  "no_stock_tts_voice_fragments": true,
+  "channels": 2,
+  "sample_rate": 24000,
+  "seconds": 124.0
+}
