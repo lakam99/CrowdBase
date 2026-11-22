@@ -13,12 +13,16 @@ const Bank& bank(){static const Bank b;return b;}
 }
 juce::AudioProcessorValueTreeState::ParameterLayout CrowdProcessor::layout(){
     juce::AudioProcessorValueTreeState::ParameterLayout l;
-    for(int i=0;i<ControlCount;++i){
-        juce::NormalisableRange<float> range(i==Output?-36.f:i==Settle?1.f:0.f,i==Output?6.f:i==Settle?25.f:1.f,i==Settle?.01f:i==Output?.01f:.001f);
+    auto addFloat=[&](int i){
+        juce::NormalisableRange<float> range(controlMin(i),controlMax(i),(i==Settle||i==Output||i==TimeToPeak)?.01f:.001f);
+        if(i==TimeToPeak)range.setSkewForCentre(.75f);
         l.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{controlIds[i],1},controlNames[i],range,defaults[i]));
-    }
+    };
+    for(int i=0;i<TimeToPeak;++i)addFloat(i);
     l.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{"erupt",1},"Big Play Trigger",false));
-    l.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{"free",1},"Free Run",false));return l;
+    l.add(std::make_unique<juce::AudioParameterBool>(juce::ParameterID{"free",1},"Free Run",false));
+    // Append after the legacy controls so existing host parameter indices hold.
+    addFloat(TimeToPeak);return l;
 }
 CrowdProcessor::CrowdProcessor():AudioProcessor(BusesProperties().withOutput("Crowd",juce::AudioChannelSet::stereo(),true)),state(*this,nullptr,"CrowdBase",layout()){
     (void)bank();seed.store((uint64_t)juce::Random::getSystemRandom().nextInt64()|1ULL);for(int i=0;i<ControlCount;++i)params[(size_t)i]=state.getRawParameterValue(controlIds[i]);
@@ -36,7 +40,8 @@ void CrowdProcessor::processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuf
     engine.setTargets(v,run);
     bool high=eruptParam->load()>.5f;
     if(suppressRestoredTrigger.exchange(false))triggerWasHigh=high;
-    if((high&&!triggerWasHigh)||manualTrigger.exchange(false))engine.trigger();triggerWasHigh=high;
+    const bool manual=manualTrigger.exchange(false);
+    if((high&&!triggerWasHigh)||manual)engine.trigger();triggerWasHigh=high;
     int cursor=0;
     for(const auto metadata:midi){if(metadata.numBytes>=3&&(metadata.data[0]&0xf0)==0x90&&metadata.data[1]==36&&metadata.data[2]!=0){int at=juce::jlimit(cursor,buffer.getNumSamples(),metadata.samplePosition);engine.render(buffer.getWritePointer(0)+cursor,buffer.getWritePointer(1)+cursor,at-cursor);cursor=at;engine.trigger();}}
     engine.render(buffer.getWritePointer(0)+cursor,buffer.getWritePointer(1)+cursor,buffer.getNumSamples()-cursor);
@@ -44,8 +49,25 @@ void CrowdProcessor::processBlock(juce::AudioBuffer<float>& buffer,juce::MidiBuf
     energyMeter.store(engine.currentEnergy());reactionMeter.store(engine.reactionAmount());voiceMeter.store(engine.activeVoices());midi.clear();
 }
 juce::AudioProcessorEditor* CrowdProcessor::createEditor(){return new CrowdEditor(*this);}
-void CrowdProcessor::getStateInformation(juce::MemoryBlock& dest){auto tree=state.copyState();tree.setProperty("skin",skin.load(),nullptr);tree.setProperty("seed",juce::String::toHexString((juce::int64)seed.load()),nullptr);tree.setProperty("formatVersion",1,nullptr);if(auto xml=tree.createXml())copyXmlToBinary(*xml,dest);}
-void CrowdProcessor::setStateInformation(const void* bytes,int length){if(length<=0||length>1024*1024)return;if(auto xml=getXmlFromBinary(bytes,length)){auto tree=juce::ValueTree::fromXml(*xml);if(tree.hasType("CrowdBase")){skin.store(juce::jlimit(0,2,(int)tree.getProperty("skin",0)));auto next=(uint64_t)tree.getProperty("seed","1").toString().getHexValue64()|1ULL;seed.store(next);pendingSeed.store(next);suppressRestoredTrigger.store(true);state.replaceState(tree);}}}
+void CrowdProcessor::getStateInformation(juce::MemoryBlock& dest){auto tree=state.copyState();tree.setProperty("skin",skin.load(),nullptr);tree.setProperty("seed",juce::String::toHexString((juce::int64)seed.load()),nullptr);tree.setProperty("formatVersion",2,nullptr);if(auto xml=tree.createXml())copyXmlToBinary(*xml,dest);}
+void CrowdProcessor::setStateInformation(const void* bytes,int length){
+    if(length<=0||length>1024*1024)return;
+    if(auto xml=getXmlFromBinary(bytes,length)){
+        auto tree=juce::ValueTree::fromXml(*xml);
+        if(tree.hasType("CrowdBase")){
+            skin.store(juce::jlimit(0,2,(int)tree.getProperty("skin",0)));
+            auto next=(uint64_t)tree.getProperty("seed","1").toString().getHexValue64()|1ULL;
+            seed.store(next);pendingSeed.store(next);suppressRestoredTrigger.store(true);
+            // Old sessions have no rise setting; restore the fast default even
+            // when loading into an instance whose slider was already changed.
+            if(!tree.getChildWithProperty("id","timeToPeak").isValid()){
+                juce::ValueTree added("PARAM");added.setProperty("id","timeToPeak",nullptr);
+                added.setProperty("value",defaults[TimeToPeak],nullptr);tree.appendChild(added,nullptr);
+            }
+            state.replaceState(tree);
+        }
+    }
+}
 void CrowdProcessor::applyPreset(int p){
     std::array<float,ControlCount> v=std::to_array(defaults);
     if(p==1){v[Energy]=.44f;v[Population]=.65f;v[Applause]=.55f;v[Whistles]=.2f;}

@@ -17,14 +17,27 @@ void CrowdLook::drawButtonBackground(juce::Graphics& g,juce::Button& b,const juc
     if(b.getComponentID()=="erupt"){g.setColour(juce::Colour(0xffb4482c).withAlpha(down?.75f:.58f));g.fillRoundedRectangle(r.reduced(8,6),3);}
     if(over){g.setColour(juce::Colours::white.withAlpha(.05f));g.fillRoundedRectangle(r.reduced(5),3);}
 }
+void CrowdLook::drawLinearSlider(juce::Graphics& g,int x,int y,int w,int h,float position,float,float,juce::Slider::SliderStyle,juce::Slider&){
+    const float cy=y+h*.5f;
+    g.setColour(ink().withAlpha(.65f));
+    for(int i=0;i<=8;++i){float tick=x+w*i/8.f;g.drawLine(tick,cy+15,tick,cy+20,i%4==0?1.4f:.8f);}
+    g.setColour(juce::Colours::black.withAlpha(.7f));g.fillRoundedRectangle((float)x,cy-3,(float)w,6.f,3.f);
+    g.setColour(juce::Colours::white.withAlpha(.2f));g.drawHorizontalLine((int)cy+3,(float)x,(float)(x+w));
+    // Reuse the photographed hardware cap and keep the same raster finishes.
+    g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+    g.drawImage(RasterAssets::get().buttons[0],{position-13,cy-16,26,32},juce::RectanglePlacement::stretchToFit);
+    g.setColour(juce::Colour(0xfff6efd4));g.drawLine(position,cy-9,position,cy+9,1.6f);
+}
 void CrowdLook::drawButtonText(juce::Graphics& g,juce::TextButton& b,bool,bool){if(b.getComponentID()=="play"||b.getComponentID()=="stop")return;label(g,b.getButtonText(),b.getLocalBounds(),juce::Colour(0xffffefd3),11);}
 CrowdEditor::CrowdEditor(CrowdProcessor& processor):AudioProcessorEditor(processor),p(processor){
     look.skin=p.skin.load();setLookAndFeel(&look);(void)RasterAssets::get();
     for(int i=0;i<ControlCount;++i){presetValues[(size_t)i]=p.state.getRawParameterValue(controlIds[i])->load();if(std::abs(presetValues[(size_t)i]-defaults[i])>.002f)presetIndex=-1;}
     for(int i=0;i<ControlCount;++i){auto& k=knobs[(size_t)i];k.setSliderStyle(juce::Slider::RotaryVerticalDrag);k.setRotaryParameters(juce::MathConstants<float>::pi*1.22f,juce::MathConstants<float>::pi*2.78f,true);k.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);k.setName(controlNames[i]);k.setDoubleClickReturnValue(true,defaults[i]);k.setTooltip(juce::String(controlNames[i])+": drag to adjust. Double-click to reset. Automatable from your host.");addAndMakeVisible(k);attachments[(size_t)i]=std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.state,controlIds[i],k);}
+    knobs[TimeToPeak].setSliderStyle(juce::Slider::LinearHorizontal);
+    knobs[TimeToPeak].setTooltip("Time from Big Play trigger to maximum reaction: 0.05 to 8 seconds. Captured at each trigger. Double-click for a fast 0.15-second rise.");
     auto add=[this](juce::TextButton& b){addAndMakeVisible(b);};add(erupt);add(play);add(stop);add(preset);add(skinButton);add(freeButton);add(device);
     erupt.setComponentID("erupt");play.setComponentID("play");stop.setComponentID("stop");
-    erupt.onClick=[this]{pulse();};erupt.setTooltip("Explosive reaction, then return to the current crowd. Automate Big Play Trigger low/high or send MIDI note 36.");
+    erupt.onClick=[this]{pulse();};erupt.setTooltip("Rise over Time to Peak, then return to the current crowd over Settle. Automate Big Play Trigger low/high or send MIDI note 36.");
     play.onClick=[this]{p.audition.store(true);};stop.onClick=[this]{p.audition.store(false);};
     play.setTooltip("Start continuous synthesis in standalone");stop.setTooltip("Fade out and stop standalone synthesis");
     freeButton.onClick=[this]{auto* q=p.state.getParameter("free");q->beginChangeGesture();q->setValueNotifyingHost(q->getValue()>.5f?0.f:1.f);q->endChangeGesture();};
@@ -40,7 +53,8 @@ void CrowdEditor::pulse(){if(auto* q=p.state.getParameter("erupt")){q->beginChan
 void CrowdEditor::timerCallback(){if(triggerOff&&(int32_t)(juce::Time::getMillisecondCounter()-triggerOff)>=0){triggerOff=0;if(auto* q=p.state.getParameter("erupt")){q->beginChangeGesture();q->setValueNotifyingHost(0);q->endChangeGesture();}}level=std::max(p.meter.load(),level*.86f);look.skin=p.skin.load();freeButton.setButtonText(p.state.getRawParameterValue("free")->load()>.5f?"FREE RUN":"FOLLOW HOST");repaint();}
 void CrowdEditor::resized(){
     for(int i=0;i<6;++i){cells[(size_t)i]={48+i*161,214,151,194};knobs[(size_t)i].setBounds(cells[(size_t)i].withTrimmedTop(24).withTrimmedBottom(37));}
-    for(int i=6;i<ControlCount;++i){cells[(size_t)i]={45+(i-6)*139,442,134,166};knobs[(size_t)i].setBounds(cells[(size_t)i].withTrimmedTop(20).withTrimmedBottom(34));}
+    constexpr int row[]{Distance,Space,Width,Tone,Variation,TimeToPeak,Settle,Output};
+    for(int column=0;column<8;++column){int i=row[column];cells[(size_t)i]={45+column*122,442,116,166};knobs[(size_t)i].setBounds(cells[(size_t)i].withTrimmedTop(23).withTrimmedBottom(34));}
     erupt.setBounds(783,641,216,51);preset.setBounds(54,642,82,28);skinButton.setBounds(54,677,82,27);
     play.setBounds(598,646,59,43);stop.setBounds(662,646,59,43);freeButton.setBounds(580,651,145,34);device.setBounds(503,651,81,34);
 }
@@ -65,12 +79,12 @@ void CrowdEditor::paint(juce::Graphics& g){
     label(g,"THE CROWD",{54,168,130,20},ink,10);label(g,"SPACE & CHARACTER",{54,413,150,20},ink,10);
     for(int i=0;i<ControlCount;++i){auto cell=cells[(size_t)i];label(g,juce::String(controlNames[i]).toUpperCase(),cell.withHeight(23),ink,11);
         auto vfd=cell.withTrimmedTop(cell.getHeight()-31).reduced(15,0).toFloat();drawVfdHousing(g,vfd);
-        auto value=(float)knobs[(size_t)i].getValue();juce::String text=i==Output?juce::String(value,1)+" DB":i==Settle?juce::String(value,1)+" S":juce::String((int)std::round(value*100))+" %";
+        auto value=(float)knobs[(size_t)i].getValue();juce::String text=i==Output?juce::String(value,1)+" DB":i==TimeToPeak?juce::String(value,2)+" S":i==Settle?juce::String(value,1)+" S":juce::String((int)std::round(value*100))+" %";
         values[(size_t)i].draw(g,text,vfd.reduced(10,4),1.35f,false);
     }
     for(int i=0;i<ControlCount;++i)if(std::abs(presetValues[(size_t)i]-(float)knobs[(size_t)i].getValue())>.002f)presetIndex=-1;
     drawVfdHousing(g,{146,643,330,27});skinLine.draw(g,presetIndex<0?"CUSTOM CROWD":sceneNames[presetIndex],{157,647,310,20},1.30f,false);
     drawVfdHousing(g,{146,678,330,26});static constexpr const char* finishes[]{"IVORY / WALNUT","GRAPHITE","VINTAGE WOOD"};
     finishLine.draw(g,finishes[look.skin],{157,680,310,22},1.25f,false);
-    label(g,"FAST ATTACK / NATURAL SETTLE",{783,697,216,16},ink.withAlpha(.7f),9);
+    label(g,"ADJUSTABLE RISE / NATURAL SETTLE",{783,697,216,16},ink.withAlpha(.7f),9);
 }

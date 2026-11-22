@@ -1,4 +1,4 @@
-# CrowdBase 0.1.0
+# CrowdBase 0.2.0
 
 An analog-style crowd instrument for continuous sports and audience ambience.
 Windows x64 VST3 instrument and standalone application. Generated raster faceplates,
@@ -19,8 +19,15 @@ to record that automation according to its write/touch mode.
 
 An example envelope: leave Energy at 18%, lift it to 40% during anticipation,
 trigger at the play, and leave Energy at 18% while the reaction settles.
-Settle controls the reaction's return time; it does not force the underlying Energy
-automation back to a preset value. Re-triggering starts a new reaction attack.
+**Time to Peak** sets the rise from trigger to maximum reaction, from **0.05 to 8
+seconds** (default **0.15 s**). Use a short rise for an explosive play, or a longer
+rise for a crowd that gradually realizes what happened. The setting is captured
+at each trigger, so moving it during a reaction sets the next reaction's rise.
+The cyan display reads seconds; double-click the slider to restore the fast default.
+Settle controls the return time after the peak; it does not force the underlying
+Energy automation back to a preset value. Re-triggering rises from the current
+reaction level without abruptly dropping the crowd. Both controls save and automate
+with the DAW; sessions from 0.1.0 keep a fast rise and their existing automation.
 
 ## Automatable controls
 
@@ -31,12 +38,13 @@ automation back to a preset value. Re-triggering starts a new reaction attack.
 | Crowd Bed | Underlying diffuse audience texture |
 | Cheers | Excited ensemble layer; Energy determines how much it emerges |
 | Applause | Additional independently synthesized palm claps, sparse in mellow passages |
-| Whistles | Rate of occasional independently synthesized spectator whistles |
+| Whistles | Rate of sustained procedural human-style whistles, with small pitch drift and breath texture |
 | Distance | Softer high frequencies and a more diffuse perspective |
 | Space | Added stadium reflections and decay |
 | Width | Mono at 0%; full stereo at 100% |
 | Tone | Broad darker-to-brighter balance |
 | Variation | Slow, irregular emotional drift around Energy |
+| Time to Peak | Big-play rise, 0.05–8 seconds; captured on each trigger |
 | Settle | Big-play decay, approximately 1–25 seconds |
 | Output | -36 to +6 dB, with smooth saturation protection |
 | Big Play Trigger | Rising-edge one-shot reaction; reset to 0 to arm again |
@@ -54,6 +62,10 @@ audio, announcers, or isolated stock TTS syllables. The 124-second stereo atlas 
 prepared from the earlier reference-matched and huge-play procedural crowd renders.
 Several independent, slightly varied overlapping passages keep evolving; no entire
 minute repeats and automation never restarts an underlying file loop.
+
+Spectator whistles are generated independently from the ensemble atlas. Longer
+steady notes, faint breath turbulence, narrow pitch drift and occasional breath
+breaks replace the earlier short, sweeping bird-like tones.
 
 The first prototype's isolated voice grains were rejected after listening feedback.
 The current engine uses ensemble textures to avoid exposed robotic "maa" syllables.

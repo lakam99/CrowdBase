@@ -7,7 +7,7 @@ namespace {constexpr float pi=3.14159265358979323846f;float clip(float x,float a
 float CrowdEngine::random() noexcept {rng^=rng>>12;rng^=rng<<25;rng^=rng>>27;return float((rng*2685821657736338717ULL)>>40)*(1.f/16777216.f);}
 void CrowdEngine::prepare(double rate,const float* samples,const float* samplesRight,int count,uint64_t seed) {
     sr=rate;bank=samples;bankR=samplesRight;bankSize=count;rng=seed?seed:1;dropped=0;time=0;
-    target=smooth=std::to_array(defaults);voices={};clocks={};reactionAge=1000;
+    target=smooth=std::to_array(defaults);voices={};clocks={};reactionAge=1000;reactionPeak=defaults[TimeToPeak];reactionStart=0;
     runTarget=gate=reaction=shownEnergy=slow=slowTarget=lowL=lowR=dcL=dcR=0;
     shownVoices=controlTick=0;slowClock=0;
     constexpr double lengths[]{.0371,.0437,.0533,.0611,.0719,.0797,.0893,.1013};
@@ -17,10 +17,15 @@ void CrowdEngine::prepare(double rate,const float* samples,const float* samplesR
 }
 void CrowdEngine::setTargets(const std::array<float,ControlCount>& values,bool running) {
     for(int i=0;i<ControlCount;++i)target[(size_t)i]=std::isfinite(values[(size_t)i])?values[(size_t)i]:defaults[i];
-    for(int i=0;i<ControlCount;++i)target[(size_t)i]=clip(target[(size_t)i],i==Output?-36.f:i==Settle?1.f:0.f,i==Output?6.f:i==Settle?25.f:1.f);
+    for(int i=0;i<ControlCount;++i)target[(size_t)i]=clip(target[(size_t)i],controlMin(i),controlMax(i));
     runTarget=running?1.f:0.f;
 }
-void CrowdEngine::trigger() noexcept {reactionAge=0;}
+void CrowdEngine::trigger() noexcept {
+    reactionAge=0;reactionStart=reaction;
+    // Capture the requested rise at the trigger. Automation changes the next
+    // reaction without bending or discontinuously restarting an active rise.
+    reactionPeak=target[TimeToPeak];
+}
 void CrowdEngine::spawn(int kind,float e) noexcept {
     Voice* slot=nullptr;for(auto& v:voices)if(v.kind<0){slot=&v;break;}
     if(!slot){++dropped;return;}auto& v=*slot;v=Voice{};v.kind=kind;
@@ -34,7 +39,7 @@ void CrowdEngine::spawn(int kind,float e) noexcept {
         v.duration=(r.length-v.cursor)/(24000.0*speed);
         v.amp*=kind==0?.055f:.18f;
     } else if(kind==2){v.duration=.055+random()*.035;v.amp*=.021f+.055f*e;v.freq=1300+random()*2500;}
-    else {v.duration=.24+random()*.62;v.freq=2200+random()*1250;v.slope=(random()-.5f)*750;v.amp*=.010f+.018f*e;}
+    else {v.whistle.start(sr,uint32_t(random()*16777215.f)+1);v.duration=v.whistle.duration;v.amp*=.010f+.018f*e;}
 }
 void CrowdEngine::render(float* left,float* right,int count) noexcept {
     const float sm=1-std::exp(-1.f/(float(sr)*.075f));
@@ -46,7 +51,10 @@ void CrowdEngine::render(float* left,float* right,int count) noexcept {
         // A stopped host freezes the population after the click-free fade.
         if(runTarget==0&&gate<.00001f){gate=0;left[sample]=right[sample]=0;continue;}
         reactionAge+=1/sr;time+=1/sr;
-        reaction=float((1-std::exp(-reactionAge/.045))*std::exp(-std::max(0.,reactionAge-.45)/(smooth[Settle]/3.3)));
+        if(reactionAge<reactionPeak){
+            float u=float(reactionAge/reactionPeak);
+            reaction=reactionStart+(1-reactionStart)*u*u*(3-2*u);
+        }else reaction=float(std::exp(-(reactionAge-reactionPeak)/(smooth[Settle]/3.3)));
         if((slowClock-=1/sr)<=0){slowTarget=(random()*2-1)*smooth[Variation]*.11f;slowClock=1.8+random()*3.7;}
         slow+=(slowTarget-slow)*float(1/(sr*1.5));
         float e=clip(smooth[Energy]+slow+reaction*(1-smooth[Energy]),0,1);shownEnergy=e;
@@ -62,7 +70,7 @@ void CrowdEngine::render(float* left,float* right,int count) noexcept {
         const float cutoff=10500-6000*distance;
         const float lpCoef=1-std::exp(-2*pi*cutoff/float(sr));
         for(auto& v:voices){
-            if(v.kind<0)continue;++active;float x=0,y=0;float u=float(v.age/v.duration);
+            if(v.kind<0)continue;++active;float x=0,y=0;
             if(v.kind<2){
                 const auto region=regions[(size_t)v.region];int index=(int)v.cursor;
                 if(index+1>=region.length||region.start+index+1>=bankSize){v.kind=-1;continue;}
@@ -82,10 +90,7 @@ void CrowdEngine::render(float* left,float* right,int count) noexcept {
                 v.lp+=lp*(n-v.noisePrev-v.lp);v.lpR+=lp*(v.lp-v.lpR);
                 x=v.lpR*1.7f*std::exp(-float(v.age)/.013f)*clip(float(v.age/.0035),0,1);
             } else {
-                float frequency=v.freq+v.slope*std::sin(pi*u);
-                v.phase+=2*pi*frequency/float(sr);if(v.phase>2*pi)v.phase-=2*pi;
-                float env=clip(float(v.age/.055),0,1)*clip(float((v.duration-v.age)/.09),0,1);
-                x=(std::sin(v.phase)+.015f*(random()*2-1))*env*.7f;
+                x=v.whistle.process(v.age,sr);
             }
             if(v.kind>=2)y=x;
             if(v.kind!=2){v.lp+=lpCoef*(x-v.lp);v.lpR+=lpCoef*(y-v.lpR);x=v.lp;y=v.lpR;}

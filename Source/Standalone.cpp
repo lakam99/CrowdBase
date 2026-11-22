@@ -35,7 +35,7 @@ public:
 class App final:public juce::JUCEApplication {
 public:
     const juce::String getApplicationName() override{return "CrowdBase";}
-    const juce::String getApplicationVersion() override{return "0.1.0";}
+    const juce::String getApplicationVersion() override{return "0.2.0";}
     bool moreThanOneInstanceAllowed() override{return true;}
     std::unique_ptr<Window> window;
     void initialise(const juce::String& command) override{
